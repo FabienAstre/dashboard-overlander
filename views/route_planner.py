@@ -22,10 +22,13 @@ def render_route_planner():
     with left:
         section_title("Route Setup")
         c1, c2 = st.columns(2)
-        with c1:
-            s.origin = st.text_input("Origin", value=s.origin, key="orig_i")
-        with c2:
-            s.destination = st.text_input("Destination", value=s.destination, key="dest_i")
+        origin = st.text_input("Origin", value=s.origin, key="orig_i")
+destination = st.text_input("Destination", value=s.destination, key="dest_i")
+if origin != s.origin:
+    s.origin = origin
+if destination != s.destination:
+    s.destination = destination
+    
 
         section_title("Waypoints")
         for i, wp in enumerate(s.waypoints):
