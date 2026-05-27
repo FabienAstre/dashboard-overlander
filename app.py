@@ -11,6 +11,7 @@ from views.camping import render_camping
 from views.vehicle import render_vehicle
 from views.ai_assistant import render_ai_assistant
 from views.border_alerts import render_border_alerts
+from views.discoveries import render_discoveries
 
 setup_page_config()
 init_session_state()
@@ -23,6 +24,7 @@ PAGE_MAP = {
     "🌍 Map Intelligence": render_map_intelligence,
     "⛽ Fuel Planner":     render_fuel_planner,
     "🏕️ Camp Intel":       render_camping,
+    "🔭 Discoveries":      render_discoveries,
     "🚗 Vehicle Panel":    render_vehicle,
     "🛂 Border Alerts":    render_border_alerts,
     "🤖 AI Assistant":     render_ai_assistant,
