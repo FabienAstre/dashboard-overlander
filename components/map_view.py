@@ -67,7 +67,6 @@ def build_expedition_map(center, zoom, tileset_name="CartoDB Dark Matter",
             folium.Circle([hz["lat"],hz["lon"]], radius=40000, color=color,
                           fill=True, fill_color=color, fill_opacity=0.08, tooltip=hz["label"]).add_to(m)
 
-    folium.LayerControl(collapsed=False).add_to(m)
     return m
 
 def render_map(height=520):
