@@ -1,5 +1,6 @@
 import streamlit as st
 from components.widgets import section_title, alert_row, route_score_bar, waypoint_list, metric_tile
+from components.map_view import fetch_route, geocode
 
 ROUTE_MODES = ["Safest", "Fastest", "Most Scenic", "Off-Road Optimized", "Fuel Efficient"]
 
@@ -15,7 +16,12 @@ AVOID_OPTIONS = [
 
 def render_route_planner():
     s = st.session_state
-    st.markdown("### Route Planner")
+    st.markdown("### 📍 Route Planner")
+    st.markdown(
+        '<p style="color:var(--text-secondary);margin-top:-0.5rem;margin-bottom:1rem;">'
+        "Plan, score, and optimize your expedition route.</p>",
+        unsafe_allow_html=True,
+    )
 
     left, right = st.columns([2, 1], gap="medium")
 
@@ -26,17 +32,28 @@ def render_route_planner():
             origin = st.text_input("Origin", value=s.origin, key="orig_i")
             if origin != s.origin:
                 s.origin = origin
+                fetch_route.clear()
+                geocode.clear()
+                if "live_weather" in st.session_state:
+                    del st.session_state["live_weather"]
+                st.rerun()
         with c2:
             destination = st.text_input("Destination", value=s.destination, key="dest_i")
             if destination != s.destination:
                 s.destination = destination
+                fetch_route.clear()
+                geocode.clear()
+                st.rerun()
 
         section_title("Waypoints")
         for i, wp in enumerate(s.waypoints):
             c1, c2 = st.columns([5, 1])
             with c1:
                 s.waypoints[i] = st.text_input(
-                    "Waypoint", value=wp, key="wp_" + str(i), label_visibility="collapsed"
+                    "Waypoint",
+                    value=wp,
+                    key="wp_" + str(i),
+                    label_visibility="collapsed",
                 )
             with c2:
                 if st.button("X", key="del_" + str(i)):
@@ -67,25 +84,38 @@ def render_route_planner():
         )
 
         if st.button("Calculate Route", use_container_width=True, type="primary"):
+            fetch_route.clear()
+            geocode.clear()
             import time
             time.sleep(0.8)
             scores = {
-                "Safest": 81,
-                "Fastest": 62,
-                "Most Scenic": 74,
+                "Safest":             81,
+                "Fastest":            62,
+                "Most Scenic":        74,
                 "Off-Road Optimized": 68,
-                "Fuel Efficient": 77,
+                "Fuel Efficient":     77,
             }
             s.route_safety_score = scores[s.route_mode]
             st.success("Route calculated — " + s.route_mode + " mode.")
 
     with right:
         section_title("Route Intelligence")
-        metric_tile("3,850", "TOTAL KM", str(len(s.waypoints)) + " stops")
+
+        total_km   = 3850
+        days_est   = round(total_km / 600, 1)
+        fuel_total = int(total_km / 100 * s.consumption_l100)
+        cost_est   = round(fuel_total * 1.55, 0)
+        wp_count   = len([w for w in s.waypoints if w.strip()])
+
+        metric_tile(
+            str(total_km),
+            "TOTAL KM",
+            str(wp_count) + " waypoints",
+        )
         st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-        metric_tile("~6.4", "DAYS", "at 600 km/day")
+        metric_tile("~" + str(days_est), "DAYS", "at 600 km/day")
         st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-        metric_tile("$980", "EST. FUEL COST", "CAD approx.")
+        metric_tile("$" + str(int(cost_est)), "EST. FUEL COST", "CAD approx.")
         st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
 
         section_title("Route Scoring")
@@ -111,5 +141,17 @@ def render_route_planner():
         alert_row("🏕", "10 campsites along route.", "ok")
 
         st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
-        section_title("Waypoint Summary")
-        waypoint_list(s.waypoints[:4], s.origin, "...")
+        section_title("Current Route")
+        st.markdown(
+            '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.3rem;">'
+            "From: <span style='color:var(--accent-cyan);'>" + s.origin + "</span></div>"
+            '<div style="font-size:0.78rem;color:var(--text-secondary);">'
+            "To: <span style='color:var(--accent-green);'>" + s.destination + "</span></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+        waypoint_list(
+            [w for w in s.waypoints if w.strip()][:4],
+            s.origin,
+            s.destination,
+        )
