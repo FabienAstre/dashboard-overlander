@@ -19,15 +19,17 @@ def render_route_planner():
 
     left, right = st.columns([2, 1], gap="medium")
 
-    with left:
-        section_title("Route Setup")
-        c1, c2 = st.columns(2)
+ with left:
+    section_title("Route Setup")
+    c1, c2 = st.columns(2)
+    with c1:
         origin = st.text_input("Origin", value=s.origin, key="orig_i")
-destination = st.text_input("Destination", value=s.destination, key="dest_i")
-if origin != s.origin:
-    s.origin = origin
-if destination != s.destination:
-    s.destination = destination
+        if origin != s.origin:
+            s.origin = origin
+    with c2:
+        destination = st.text_input("Destination", value=s.destination, key="dest_i")
+        if destination != s.destination:
+            s.destination = destination
     
 
         section_title("Waypoints")
