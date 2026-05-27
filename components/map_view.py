@@ -43,18 +43,41 @@ FALLBACK_COORDS = [
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def geocode(place):
+    # Try Geoapify first
+    try:
+        api_key = st.secrets.get("GEOAPIFY_API_KEY", "")
+        if api_key:
+            r = requests.get(
+                "https://api.geoapify.com/v1/geocode/search",
+                params={
+                    "text":   place,
+                    "limit":  1,
+                    "apiKey": api_key,
+                },
+                timeout=8,
+            )
+            r.raise_for_status()
+            features = r.json().get("features", [])
+            if features:
+                coords = features[0]["geometry"]["coordinates"]
+                return float(coords[1]), float(coords[0])
+    except Exception:
+        pass
+
+    # Fallback to Nominatim
     try:
         r = requests.get(
             "https://nominatim.openstreetmap.org/search",
             params={"q": place, "format": "json", "limit": 1},
             headers={"User-Agent": "OverlanderOS/1.0"},
-            timeout=5,
+            timeout=8,
         )
         results = r.json()
         if results:
             return float(results[0]["lat"]), float(results[0]["lon"])
     except Exception:
         pass
+
     return None
 
 
@@ -62,8 +85,10 @@ def geocode(place):
 def fetch_route(origin, destination):
     o = geocode(origin)
     d = geocode(destination)
+
     if not o or not d:
         return FALLBACK_COORDS, FALLBACK_COORDS[0], FALLBACK_COORDS[-1]
+
     try:
         coords_str = (
             str(o[1]) + "," + str(o[0]) + ";"
@@ -77,12 +102,13 @@ def fetch_route(origin, destination):
         )
         data = r.json()
         if data.get("code") == "Ok":
-            raw = data["routes"][0]["geometry"]["coordinates"]
+            raw    = data["routes"][0]["geometry"]["coordinates"]
             coords = [[lat, lon] for lon, lat in raw]
             return coords, o, d
     except Exception:
         pass
-    return FALLBACK_COORDS, o if o else FALLBACK_COORDS[0], d if d else FALLBACK_COORDS[-1]
+
+    return FALLBACK_COORDS, o, d
 
 
 def _icon(emoji, size=22):
@@ -101,8 +127,12 @@ def build_expedition_map(center, zoom, tileset_name="CartoDB Dark Matter",
     if ts["tiles"] == "OpenStreetMap":
         m = folium.Map(location=center, zoom_start=zoom, tiles="OpenStreetMap")
     else:
-        m = folium.Map(location=center, zoom_start=zoom,
-                       tiles=ts["tiles"], attr=ts["attr"])
+        m = folium.Map(
+            location=center,
+            zoom_start=zoom,
+            tiles=ts["tiles"],
+            attr=ts["attr"],
+        )
 
     s = st.session_state
 
@@ -115,16 +145,28 @@ def build_expedition_map(center, zoom, tileset_name="CartoDB Dark Matter",
         opacity=0.9,
         tooltip=s.origin.split(",")[0] + " to " + s.destination.split(",")[0],
     ).add_to(m)
-    folium.PolyLine(route_coords, color="#00d4ff", weight=10, opacity=0.12).add_to(m)
+    folium.PolyLine(
+        route_coords,
+        color="#00d4ff",
+        weight=10,
+        opacity=0.12,
+    ).add_to(m)
 
-    # ── Origin / Destination markers ──
-    folium.Marker(start, icon=_icon("🟢", 26), tooltip="Origin: " + s.origin).add_to(m)
-    folium.Marker(end,   icon=_icon("🏁", 26), tooltip="Destination: " + s.destination).add_to(m)
+    # ── Origin / Destination ──
+    folium.Marker(
+        start,
+        icon=_icon("🟢", 26),
+        tooltip="Origin: " + s.origin,
+    ).add_to(m)
+    folium.Marker(
+        end,
+        icon=_icon("🏁", 26),
+        tooltip="Destination: " + s.destination,
+    ).add_to(m)
 
-    # ── OSM places from session (loaded via Map Intelligence page) ──
+    # ── OSM places from session ──
     all_places = st.session_state.get("osm_places", [])
 
-    # Campsites
     if show_camps:
         camps = filter_places(all_places, types=["campsite"])
         for c in camps[:400]:
@@ -135,7 +177,6 @@ def build_expedition_map(center, zoom, tileset_name="CartoDB Dark Matter",
                 tooltip="<b>" + c["name"] + "</b>" + fee_txt,
             ).add_to(m)
 
-    # Fuel stops
     if show_fuel:
         fuel = filter_places(all_places, types=["fuel"])
         for f in fuel[:400]:
@@ -146,13 +187,21 @@ def build_expedition_map(center, zoom, tileset_name="CartoDB Dark Matter",
                 tooltip="<b>" + f["name"] + "</b>" + brand,
             ).add_to(m)
 
-    # Water points
     water = filter_places(all_places, types=["water"])
     for w in water[:100]:
         folium.Marker(
             [w["lat"], w["lon"]],
             icon=_icon("💧", 16),
             tooltip="<b>" + w["name"] + "</b>",
+        ).add_to(m)
+
+    # ── Discoveries from session ──
+    discoveries = st.session_state.get("discovery_places", [])
+    for p in discoveries[:300]:
+        folium.Marker(
+            [p["lat"], p["lon"]],
+            icon=_icon(p["icon"], 20),
+            tooltip="<b>" + p["icon"] + " " + p["name"] + "</b><br>" + p["label"],
         ).add_to(m)
 
     # ── Border crossings ──
@@ -214,7 +263,9 @@ def render_map(height=520):
     osm_loaded = st.session_state.get("osm_places_loaded", False)
     if not osm_loaded:
         st.markdown(
-            '<div class="os-alert os-alert-info">💡 Go to <b>Map Intelligence</b> page and click <b>Fetch OSM Data</b> to load real campsites and fuel stops.</div>',
+            '<div class="os-alert os-alert-info">💡 Go to '
+            '<b>Map Intelligence</b> and click <b>Fetch OSM Data</b> '
+            'to load real campsites and fuel stops.</div>',
             unsafe_allow_html=True,
         )
 
