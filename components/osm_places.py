@@ -57,20 +57,7 @@ def _parse_elements(elements):
     return places
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def fetch_by_country(country_code="MX"):
-    tag_union = "\n".join(
-        "  node[" + t + "](area.country);"
-        for t in OSM_TAGS
-    )
-    query = """
-    [out:json][timeout:60];
-    area["ISO3166-1"="{cc}"]->.country;
-    (
-    {tags}
-    );
-    out body;
-    """.format(cc=country_code, tags=tag_union)
+def _run_overpass(query):
     try:
         r = requests.post(
             "https://overpass-api.de/api/interpreter",
@@ -80,55 +67,89 @@ def fetch_by_country(country_code="MX"):
         r.raise_for_status()
         return _parse_elements(r.json().get("elements", []))
     except Exception as e:
-        st.warning("OSM country fetch error: " + str(e))
+        st.warning("OSM fetch error: " + str(e))
         return []
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_by_country(country_code="MX"):
+    query = """
+[out:json][timeout:55];
+area["ISO3166-1"="{cc}"]->.searchArea;
+(
+  node["tourism"="camp_site"](area.searchArea);
+  node["tourism"="caravan_site"](area.searchArea);
+  node["amenity"="fuel"](area.searchArea);
+  node["amenity"="water_point"](area.searchArea);
+  node["amenity"="shower"](area.searchArea);
+  way["tourism"="camp_site"](area.searchArea);
+  way["amenity"="fuel"](area.searchArea);
+);
+out center 1000;
+""".format(cc=country_code)
+    return _run_overpass(query)
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_by_radius(lat, lon, radius_km=200):
-    radius_m  = radius_km * 1000
-    tag_union = "\n".join(
-        "  node[" + t + "](around:" + str(radius_m) + "," + str(lat) + "," + str(lon) + ");"
-        for t in OSM_TAGS
-    )
+    radius_m = radius_km * 1000
     query = """
-    [out:json][timeout:60];
-    (
-    {tags}
-    );
-    out body;
-    """.format(tags=tag_union)
-    try:
-        r = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data={"data": query},
-            timeout=65,
-        )
-        r.raise_for_status()
-        return _parse_elements(r.json().get("elements", []))
-    except Exception as e:
-        st.warning("OSM radius fetch error: " + str(e))
-        return []
+[out:json][timeout:55];
+(
+  node["tourism"="camp_site"](around:{r},{lat},{lon});
+  node["tourism"="caravan_site"](around:{r},{lat},{lon});
+  node["amenity"="fuel"](around:{r},{lat},{lon});
+  node["amenity"="water_point"](around:{r},{lat},{lon});
+  node["amenity"="shower"](around:{r},{lat},{lon});
+  way["tourism"="camp_site"](around:{r},{lat},{lon});
+  way["amenity"="fuel"](around:{r},{lat},{lon});
+);
+out center 1000;
+""".format(r=radius_m, lat=lat, lon=lon)
+    return _run_overpass(query)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def geocode_place(place):
+    # Try Geoapify first
+    try:
+        api_key = st.secrets.get("GEOAPIFY_API_KEY", "")
+        if api_key:
+            r = requests.get(
+                "https://api.geoapify.com/v1/geocode/search",
+                params={
+                    "text":   place,
+                    "limit":  1,
+                    "apiKey": api_key,
+                },
+                timeout=8,
+            )
+            r.raise_for_status()
+            features = r.json().get("features", [])
+            if features:
+                coords = features[0]["geometry"]["coordinates"]
+                return float(coords[1]), float(coords[0])
+    except Exception:
+        pass
+
+    # Fallback to Nominatim
     try:
         r = requests.get(
             "https://nominatim.openstreetmap.org/search",
             params={"q": place, "format": "json", "limit": 1},
             headers={"User-Agent": "OverlanderOS/1.0"},
-            timeout=5,
+            timeout=8,
         )
         results = r.json()
         if results:
             return float(results[0]["lat"]), float(results[0]["lon"])
     except Exception:
         pass
+
     return None
 
 
 def filter_places(places, types=None):
-    if types:
-        return [p for p in places if p["type"] in types]
-    return places
+    if not types:
+        return places
+    return [p for p in places if p["type"] in types]
