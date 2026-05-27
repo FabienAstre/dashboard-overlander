@@ -18,117 +18,102 @@ TYPE_META = {
     "nature_reserve":      {"icon": "🌿",  "label": "Nature Reserve",     "color": "#10b981"},
 }
 
+# Geoapify free tier — 3000 calls/day, no CC required
+# Sign up at https://www.geoapify.com — takes 2 minutes
+GEOAPIFY_CATEGORIES = [
+    "tourism.attraction",
+    "tourism.sights.viewpoint",
+    "tourism.sights.place_of_worship",
+    "natural.beach",
+    "natural.water.hot_spring",
+    "natural.water.waterfall",
+    "natural.mountain",
+    "heritage.unesco",
+    "heritage.ruins",
+]
 
-def _parse_discovery_elements(elements):
-    places = []
-    for el in elements:
-        tags     = el.get("tags", {})
-        tourism  = tags.get("tourism", "")
-        historic = tags.get("historic", "")
-        natural  = tags.get("natural", "")
-        leisure  = tags.get("leisure", "")
-        name     = tags.get("name", "")
-        desc     = tags.get("description", "") or tags.get("wikipedia", "")
-
-        ptype = tourism or historic or natural or leisure
-        if not ptype or ptype not in TYPE_META:
-            continue
-
-        lat = el.get("lat") or (el.get("center", {}).get("lat"))
-        lon = el.get("lon") or (el.get("center", {}).get("lon"))
-        if not lat or not lon:
-            continue
-
-        meta = TYPE_META[ptype]
-        if not name:
-            name = meta["label"] + " (" + str(round(float(lat), 3)) + ")"
-
-        places.append({
-            "name":    name,
-            "lat":     float(lat),
-            "lon":     float(lon),
-            "type":    ptype,
-            "icon":    meta["icon"],
-            "label":   meta["label"],
-            "color":   meta["color"],
-            "desc":    desc[:300] if desc else "",
-            "ele":     tags.get("ele", ""),
-            "website": tags.get("website", ""),
-        })
-    return places
+GEOAPIFY_TYPE_MAP = {
+    "tourism.attraction":              ("attraction", "🏛"),
+    "tourism.sights.viewpoint":        ("viewpoint",  "👁"),
+    "natural.beach":                   ("beach",      "🏖"),
+    "natural.water.hot_spring":        ("hot_spring", "♨️"),
+    "natural.water.waterfall":         ("waterfall",  "💧"),
+    "natural.mountain":                ("peak",       "🏔"),
+    "heritage.unesco":                 ("ruins",      "🗿"),
+    "heritage.ruins":                  ("ruins",      "🗿"),
+}
 
 
-def _run_overpass(query):
+def _get_geoapify_key():
     try:
-        r = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data=query.encode("utf-8"),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=60,
-        )
-        r.raise_for_status()
-        return _parse_discovery_elements(r.json().get("elements", []))
-    except Exception as e:
-        st.warning("OSM fetch error: " + str(e))
-        return []
-
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def fetch_discoveries_by_country(country_code="MX"):
-    query = """
-[out:json][timeout:55];
-area["ISO3166-1"="{cc}"]->.searchArea;
-(
-  node["tourism"="viewpoint"](area.searchArea);
-  node["tourism"="attraction"](area.searchArea);
-  node["tourism"="museum"](area.searchArea);
-  node["tourism"="artwork"](area.searchArea);
-  node["historic"="ruins"](area.searchArea);
-  node["historic"="archaeological_site"](area.searchArea);
-  node["historic"="monument"](area.searchArea);
-  node["natural"="peak"](area.searchArea);
-  node["natural"="beach"](area.searchArea);
-  node["natural"="hot_spring"](area.searchArea);
-  node["natural"="waterfall"](area.searchArea);
-  node["leisure"="nature_reserve"](area.searchArea);
-  way["tourism"="attraction"](area.searchArea);
-  way["historic"="ruins"](area.searchArea);
-  way["historic"="archaeological_site"](area.searchArea);
-  way["natural"="beach"](area.searchArea);
-  way["leisure"="nature_reserve"](area.searchArea);
-);
-out center 500;
-""".format(cc=country_code)
-    return _run_overpass(query)
+        return st.secrets["GEOAPIFY_API_KEY"]
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_discoveries_by_radius(lat, lon, radius_km=150):
-    radius_m = radius_km * 1000
-    query = """
-[out:json][timeout:55];
-(
-  node["tourism"="viewpoint"](around:{r},{lat},{lon});
-  node["tourism"="attraction"](around:{r},{lat},{lon});
-  node["tourism"="museum"](around:{r},{lat},{lon});
-  node["tourism"="artwork"](around:{r},{lat},{lon});
-  node["historic"="ruins"](around:{r},{lat},{lon});
-  node["historic"="archaeological_site"](around:{r},{lat},{lon});
-  node["historic"="monument"](around:{r},{lat},{lon});
-  node["natural"="peak"](around:{r},{lat},{lon});
-  node["natural"="beach"](around:{r},{lat},{lon});
-  node["natural"="hot_spring"](around:{r},{lat},{lon});
-  node["natural"="waterfall"](around:{r},{lat},{lon});
-  node["leisure"="nature_reserve"](around:{r},{lat},{lon});
-  way["tourism"="attraction"](around:{r},{lat},{lon});
-  way["historic"="ruins"](around:{r},{lat},{lon});
-  way["historic"="archaeological_site"](around:{r},{lat},{lon});
-  way["natural"="beach"](around:{r},{lat},{lon});
-  way["leisure"="nature_reserve"](around:{r},{lat},{lon});
-);
-out center 500;
-""".format(r=radius_m, lat=lat, lon=lon)
-    return _run_overpass(query)
+    api_key = _get_geoapify_key()
+    if not api_key:
+        st.warning("Add GEOAPIFY_API_KEY to Streamlit secrets. Free at geoapify.com")
+        return []
+
+    places = []
+    for category in GEOAPIFY_CATEGORIES:
+        try:
+            r = requests.get(
+                "https://api.geoapify.com/v2/places",
+                params={
+                    "categories": category,
+                    "filter":     "circle:" + str(lon) + "," + str(lat) + "," + str(radius_km * 1000),
+                    "limit":      100,
+                    "apiKey":     api_key,
+                },
+                timeout=10,
+            )
+            r.raise_for_status()
+            for feat in r.json().get("features", []):
+                props = feat.get("properties", {})
+                geom  = feat.get("geometry", {})
+                coords = geom.get("coordinates", [None, None])
+                name  = props.get("name", "")
+                if not name:
+                    continue
+                ptype, icon = GEOAPIFY_TYPE_MAP.get(category, ("attraction", "🏛"))
+                meta = TYPE_META.get(ptype, TYPE_META["attraction"])
+                places.append({
+                    "name":    name,
+                    "lat":     coords[1],
+                    "lon":     coords[0],
+                    "type":    ptype,
+                    "icon":    icon,
+                    "label":   meta["label"],
+                    "color":   meta["color"],
+                    "desc":    props.get("description", "")[:300],
+                    "website": props.get("website", ""),
+                    "ele":     "",
+                })
+        except Exception as e:
+            continue
+    return places
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_discoveries_by_country(country_code="MX"):
+    # Country bounding boxes
+    BBOXES = {
+        "MX": (14.5, -117.1, 32.7, -86.7),
+        "US": (24.4, -125.0, 49.4, -66.9),
+        "CA": (41.7, -141.0, 83.1, -52.6),
+    }
+    bbox = BBOXES.get(country_code)
+    if not bbox:
+        return []
+    # Use center of bbox + large radius
+    center_lat = (bbox[0] + bbox[2]) / 2
+    center_lon = (bbox[1] + bbox[3]) / 2
+    radius_km  = int(((bbox[2] - bbox[0]) * 111) / 2)
+    return fetch_discoveries_by_radius(center_lat, center_lon, min(radius_km, 500))
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -169,12 +154,12 @@ def fetch_wikipedia_nearby(lat, lon, radius_km=50):
         r = requests.get(
             "https://en.wikipedia.org/w/api.php",
             params={
-                "action":  "query",
-                "list":    "geosearch",
-                "gscoord": str(lat) + "|" + str(lon),
+                "action":   "query",
+                "list":     "geosearch",
+                "gscoord":  str(lat) + "|" + str(lon),
                 "gsradius": str(min(radius_km * 1000, 10000)),
-                "gslimit": 20,
-                "format":  "json",
+                "gslimit":  20,
+                "format":   "json",
             },
             headers={"User-Agent": "OverlanderOS/1.0"},
             timeout=10,
