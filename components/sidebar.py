@@ -6,6 +6,7 @@ NAV_ITEMS = [
     "🌍 Map Intelligence",
     "⛽ Fuel Planner",
     "🏕️ Camp Intel",
+    "🔭 Discoveries",
     "🚗 Vehicle Panel",
     "🛂 Border Alerts",
     "🤖 AI Assistant",
